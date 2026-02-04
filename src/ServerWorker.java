@@ -47,6 +47,12 @@ public class ServerWorker implements Runnable{
                     continue;
                 }
 
+                if(linea.startsWith("show ")){
+                    String ruta = linea.substring(5).trim();
+                    ejecutarShow(ruta, salida);
+                    continue;
+                }
+
             }
 
         } catch (IOException e) {
@@ -87,6 +93,20 @@ public class ServerWorker implements Runnable{
            }
 
            salida.println("");
+
+    }
+
+    void ejecutarShow(String ruta, PrintWriter salida){
+        File dir = new File(ruta);
+
+        if(!dir.exists() || !dir.isDirectory()){
+            salida.println("KO");
+            return;
+        }
+
+        salida.println("OK");
+
+
 
     }
 }
