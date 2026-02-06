@@ -3,6 +3,8 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
 
 public class ServerWorker implements Runnable{
@@ -53,6 +55,12 @@ public class ServerWorker implements Runnable{
                     continue;
                 }
 
+                if(linea.startsWith("delete ")){
+                    String ruta = linea.substring(5).trim();
+                    ejecutarDelete(ruta, salida);
+                    continue;
+                }
+
             }
 
         } catch (IOException e) {
@@ -97,16 +105,83 @@ public class ServerWorker implements Runnable{
     }
 
     void ejecutarShow(String ruta, PrintWriter salida){
+
         File dir = new File(ruta);
 
-        if(!dir.exists() || !dir.isDirectory()){
+        if(!dir.exists() || !dir.isFile()){
+            salida.println("KO");
+            return;
+        }
+
+        List<String> lineas = new ArrayList<>();
+
+        try(BufferedReader bufferedReader = new BufferedReader(new FileReader(dir))){
+
+            String linea;
+
+            while((linea = bufferedReader.readLine()) != null){
+                lineas.add(linea);
+            }
+
+        }catch(IOException e){
             salida.println("KO");
             return;
         }
 
         salida.println("OK");
+        salida.println(lineas.size());
+
+        for(String l : lineas){
+            salida.println(l);
+        }
+
+    }
 
 
+
+    void ejecutarDelete(String ruta, PrintWriter salida){
+
+        File dir = new File(ruta);
+
+        if(!dir.exists()){
+            salida.println("KO");
+            return;
+        }
+
+        if(dir.isFile()){
+            if(dir.delete()){
+                salida.println("OK");
+                return;
+            }else{
+                salida.println("KO");
+                return;
+            }
+        }
+
+        if(dir.isDirectory()){
+            File[] hijos = dir.listFiles();
+
+            if(hijos == null){
+                salida.println("KO");
+                return;
+            }
+
+            if(hijos.length > 0){
+                salida.println("KO");
+                return;
+            }
+
+            if(dir.delete()){
+                salida.println("OK");
+            }else{
+                salida.println("KO");
+                return;
+            }
+
+
+        }
+
+        salida.println("KO");
 
     }
 }
