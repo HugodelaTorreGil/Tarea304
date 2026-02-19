@@ -21,119 +21,168 @@ public class ServerWorker implements Runnable{
     @Override
     public void run() {
 
+        //Saco la ip del cliente para los logs
         String ip = socketCliente.getInetAddress().getHostAddress();
+        //Dejo registrado que el/la cliente se ha conectado
         ServerLogger.log(ip, "CONNECT");
 
-        try(
-                BufferedReader entrada = new BufferedReader(new InputStreamReader(socketCliente.getInputStream()));
-                PrintWriter salida = new PrintWriter(new BufferedWriter(new OutputStreamWriter(socketCliente.getOutputStream())));
-                DataInputStream binIn = new DataInputStream(new BufferedInputStream(socketCliente.getInputStream()));
-                DataOutputStream binOut = new DataOutputStream(new BufferedOutputStream(socketCliente.getOutputStream()))
-        ){
+        try {
+            InputStream rawIn = socketCliente.getInputStream();
+            OutputStream rawOut = socketCliente.getOutputStream();
 
-            while(true){
+            //Preparo el lector de texto para leer comandos línea a línea
+            BufferedReader entrada = new BufferedReader(new InputStreamReader(rawIn));
+            //Preparo el escritor de texto con autoflush para que el/la cliente reciba lo que mando al momento
+            PrintWriter salida = new PrintWriter(new BufferedWriter(new OutputStreamWriter(rawOut)), true);
 
+            //Preparo el lector binario para los uploads (tamaño + bytes)
+            DataInputStream binIn = new DataInputStream(rawIn);
+            //Preparo el escritor binario para los downloads (tamaño + bytes)
+            DataOutputStream binOut = new DataOutputStream(rawOut);
+
+            while (true) {
+
+                //Leo la línea del cliente
                 String linea = entrada.readLine();
-                ServerLogger.log(ip, "RECV: " + linea);
+                //Registro lo que me llega
+                ServerLogger.log(ip, "RECIBIDO: " + linea);
 
-                if(linea == null){
-                    break;
-                }
+                //Si me llega null es que el cliente ha cerrado la conexión
+                if (linea == null) break;
 
+                //Limpio los espacios para evitar fallos por escribir con espacios raros
                 linea = linea.trim();
 
-                if(linea.isEmpty()){
-                    System.out.println("KO");
+                //Si me llega una línea vacía lo considero comando inválido
+                if (linea.isEmpty()) {
+                    //Contesto KO al cliente porque no hay comando real
+                    salida.println("KO");
                     continue;
                 }
 
-                if(linea.equals("quit")){
-                    System.out.println("OK");
+                //Si el cliente me pide salir, le contesto OK y cierro la sesión
+                if (linea.equals("quit")) {
+                    salida.println("OK");
                     break;
                 }
 
-                if(linea.startsWith("list ")){
+                if (linea.startsWith("list ")) {
                     String ruta = linea.substring(5).trim();
                     ejecutarList(ruta, salida);
                     continue;
                 }
 
-                if(linea.startsWith("show ")){
+                if (linea.startsWith("show ")) {
                     String ruta = linea.substring(5).trim();
                     ejecutarShow(ruta, salida);
                     continue;
                 }
 
-                if(linea.startsWith("delete ")){
-                    String ruta = linea.substring(5).trim();
+                if (linea.startsWith("delete ")) {
+                    String ruta = linea.substring(7).trim();
                     ejecutarDelete(ruta, salida);
                     continue;
                 }
 
-                if(linea.startsWith("upload ")){
+                if (linea.startsWith("upload ")) {
                     String ruta = linea.substring(7).trim();
                     ejecutarUpload(ruta, salida, binIn, ip);
                     continue;
                 }
 
-                if(linea.startsWith("dowload ")){
+                if (linea.startsWith("download ")) {
                     String ruta = linea.substring(9).trim();
                     ejecutarDownload(ruta, salida, binOut, ip);
                     continue;
                 }
 
+                //Si no reconozco el comando, le contesto KO al cliente
+                salida.println("KO");
             }
 
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            //Registro el error por si algo falla en la conexión o en el parsing
+            ServerLogger.log(ip, "ERROR: " + e.getMessage());
+        } finally {
+            //Dejo registrado que el cliente se ha desconectado
+            ServerLogger.log(ip, "DESCONECTADO");
+            try { socketCliente.close(); } catch (IOException ignored) {}
         }
-
-
     }
+
 
     void ejecutarList(String ruta, PrintWriter salida){
 
-            File dir = new File(ruta);
+        //Si me llega vacío o null, lo corto
+        if (ruta == null || ruta.isBlank()) {
+            salida.println("KO");
+            return;
+        }
 
-            if(!dir.exists() || !dir.isDirectory()){
-                salida.println("KO");
-                return;
+        //Resuelvo la ruta respecto al directorio actual del cliente
+        File dir = directorioActual.resolve(ruta).normalize().toFile();
+
+        //Valido que exista y sea directorio
+        if(!dir.exists() || !dir.isDirectory()){
+            salida.println("KO");
+            return;
+        }
+
+        //Saco el contenido del directorio
+        File[] contenido = dir.listFiles();
+
+        //Si listFiles falla (permisos o error), devuelvo KO
+        if (contenido == null) {
+            salida.println("KO");
+            return;
+        }
+
+        //Empiezo la respuesta correcta
+        salida.println("OK");
+
+        //Recorro todos los archivos y carpetas que hay dentro
+        for(int i = 0; i < contenido.length; i++){
+            File f = contenido[i];
+            String nombre = f.getName();
+            long tamano;
+
+            //Si es directorio marco tamaño 0 como pide el protocolo
+            if(f.isDirectory()){
+                tamano = 0;
+            }else{
+                //Saco el tamaño en KB para que salga algo más razonable
+                tamano = f.length() / 1024;
             }
 
-            salida.println("OK");
+            //Aquí mando "nombre tamaño"
+            salida.println(nombre + " " + tamano);
+        }
 
-           File[] contenido = dir.listFiles();
-
-           for(int i = 0; i >= contenido.length; i++){
-               File f = contenido[i];
-               String nombre = f.getName();
-               long tamano;
-
-               if(f.isDirectory()){
-                   tamano = 0;
-               }else{
-                   tamano = f.length() / 1024;
-               }
-
-               salida.println(nombre + " " + tamano);
-
-           }
-
-           salida.println("");
-
+        //Aquí mando la línea vacía como delimitador de fin del list
+        salida.println("");
     }
 
     void ejecutarShow(String ruta, PrintWriter salida){
 
-        File dir = new File(ruta);
+        //Si me llega vacío o null, KO
+        if (ruta == null || ruta.isBlank()) {
+            salida.println("KO");
+            return;
+        }
 
+        //Resuelvo la ruta respecto al directorio actual del cliente
+        File dir = directorioActual.resolve(ruta).normalize().toFile();
+
+        //Valido que exista y sea archivo
         if(!dir.exists() || !dir.isFile()){
             salida.println("KO");
             return;
         }
 
+        //Guardo las líneas para poder mandar primero el número de líneas
         List<String> lineas = new ArrayList<>();
 
+        //Abro el archivo y lo leo línea a línea
         try(BufferedReader bufferedReader = new BufferedReader(new FileReader(dir))){
 
             String linea;
@@ -147,307 +196,188 @@ public class ServerWorker implements Runnable{
             return;
         }
 
+        //Empiezo respuesta correcta
         salida.println("OK");
+        //Mando el total de líneas
         salida.println(lineas.size());
 
+        //Mando el contenido del archivo
         for(String l : lineas){
             salida.println(l);
         }
-
     }
 
     void ejecutarDelete(String ruta, PrintWriter salida){
 
-        File dir = new File(ruta);
+        //Si me llega vacío o null, KO
+        if (ruta == null || ruta.isBlank()) {
+            salida.println("KO");
+            return;
+        }
 
+        //Resuelvo la ruta respecto al directorio actual del cliente
+        File dir = directorioActual.resolve(ruta).normalize().toFile();
+
+        //Si no existe, KO
         if(!dir.exists()){
             salida.println("KO");
             return;
         }
 
+        //Si es archivo, intento borrarlo
         if(dir.isFile()){
             if(dir.delete()){
                 salida.println("OK");
-                return;
             }else{
                 salida.println("KO");
-                return;
             }
+            return;
         }
 
+        //Si es directorio, solo dejo borrar si está vacío
         if(dir.isDirectory()){
             File[] hijos = dir.listFiles();
 
+            //Aquí si no puedo listar, KO
             if(hijos == null){
                 salida.println("KO");
                 return;
             }
 
+            //Si tiene contenido, KO
             if(hijos.length > 0){
                 salida.println("KO");
                 return;
             }
 
+            //Si está vacío, intento borrarlo
             if(dir.delete()){
                 salida.println("OK");
             }else{
                 salida.println("KO");
-                return;
             }
-
-
-        }
-
-        salida.println("KO");
-
-    }
-
-    void ejecutarUpload(String ruta, PrintWriter salida, DataInputStream binIn, String ip){
-        if(ruta == null || ruta.isBlank()){
-            salida.println("KO");
-            ServerLogger.log(ip, "RESP: KO (falta ruta en el upload)");
             return;
         }
 
-        //Solo el nombre
-        String nombreArchivo = Paths.get(ruta).getFileName().toString();
-        Path dest = Paths.get(nombreArchivo).toAbsolutePath().normalize();
+        //Por si me llega algo rarísimo que no es ni archivo ni directorio
+        salida.println("KO");
+    }
 
-        // Si ya existe, KO
-        if (Files.exists(dest)) {
+    void ejecutarUpload(String ruta, PrintWriter salida, DataInputStream binIn, String ip){
+        //Si falta la ruta, KO
+        if(ruta == null || ruta.isBlank()){
             salida.println("KO");
-            ServerLogger.log(ip, "RESP: KO (upload exists) " + nombreArchivo);
+            ServerLogger.log(ip, "RESPUESTA: KO (falta ruta en el upload)");
+            return;
+        }
+
+        //Me quedo solo con el nombre para que no me cuelen rutas tipo ../..
+        String nombreArchivo = Paths.get(ruta).getFileName().toString();
+
+        //Preparo el destino respetando el directorio actual del cliente
+        Path destino = directorioActual.resolve(nombreArchivo).normalize();
+
+        //Si ya existe el archivo, KO
+        if (Files.exists(destino)) {
+            salida.println("KO");
+            ServerLogger.log(ip, "RESPUESTA: KO (ya existe el archivo: ) " + nombreArchivo);
             return;
         }
 
         try{
+            //Le digo al cliente que puede empezar a mandar el binario
             salida.println("OK");
-            ServerLogger.log(ip, "RESP: OK (empezando upload) " + nombreArchivo);
+            ServerLogger.log(ip, "RESPUESTA: OK (empezando upload: ) " + nombreArchivo);
 
+            //Leo el tamaño total del archivo
             long tamano = binIn.readLong();
             if(tamano < 0){
                 throw new IOException("Tamaño negativo");
             }
 
-            /*
-            Creo el archivo de destino en el destino que le he indicado anteriormente
-            Lo hago con un OutputStream para pasarlo en bloques y que sea más rápido
-             */
-            try(OutputStream fos = new BufferedOutputStream(Files.newOutputStream(dest, StandardOpenOption.CREATE_NEW))){
+            //Creo el archivo de destino y voy escribiendo en bloques para que vaya rápido
+            try(OutputStream fos = new BufferedOutputStream(Files.newOutputStream(destino, StandardOpenOption.CREATE_NEW))){
                 //Creo el buffer de memoria
                 byte[] buffer = new byte[8192];
-                //Contador de los bytes que me quedan por leer
+                //Llevo la cuenta de lo que me falta por recibir
                 long restante = tamano;
 
-                //Mientras haya bytes por recibir...
+                //Mientras me queden bytes por recibir sigo leyendo
                 while(restante > 0){
-                    //Ajusto para leer los bytes necesarios
+                    //Ajusto lo que voy a leer para no pasarme del final
                     int paraLeer = (int) Math.min(buffer.length, restante);
-                    //Leo hasta donde me indica el paraLeer
-                    int leer = binIn.read(buffer, 0, paraLeer);
+                    //Leo del socket justo los bytes que necesito
+                    int leidos = binIn.read(buffer, 0, paraLeer);
 
-                    //Por si el cliente se cerró antes de completar el upload
-                    if(leer == -1){
+                    //Si el cliente se corta a mitad, fallo
+                    if(leidos == -1){
                         throw new EOFException("El cliente se cerro durante el upload");
                     }
-                    //Escribo en el archivo
-                    fos.write(buffer, 0, leer);
-                    //Resto lo que ya recibí y cuando llegue a 0 el archivo se habrá mandado por completo
-                    restante -= leer;
+
+                    //Escribo en el archivo los bytes que acabo de recibir
+                    fos.write(buffer, 0, leidos);
+                    //Resto lo recibido y cuando llegue a 0 ya está completo
+                    restante -= leidos;
                 }
             }
 
-            ServerLogger.log(ip, "UPLOAD OK " + nombreArchivo + " (" + tamano + " bytes");
+            //Dejo registrado que el upload ha terminado bien
+            ServerLogger.log(ip, "UPLOAD OK " + nombreArchivo + " (" + tamano + " bytes)");
 
         } catch (IOException e) {
-            // Si ya se mandó el OK pero falló a mitad, al menos se loguea.
+            //Logueo el fallo para saber qué ha pasado
             ServerLogger.log(ip, "FALLO EN EL UPLOAD " + nombreArchivo + " (" + e.getMessage() + ")");
-            throw new RuntimeException(e);
+            //Intento borrar el archivo parcial si se quedó a medias
+            try { Files.deleteIfExists(destino); } catch (IOException ignored) {}
         }
-
     }
 
     void ejecutarDownload(String ruta, PrintWriter salida, DataOutputStream binOut, String ip) throws IOException {
 
+        //Si falta la ruta, KO
         if (ruta == null || ruta.isBlank()) {
             salida.println("KO");
-            ServerLogger.log(ip, "RESP: KO (No se encuentra la ruta a la que hacer download)");
+            ServerLogger.log(ip, "RESPUESTA: KO (No se encuentra la ruta a la que hacer download)");
             return;
         }
 
-        Path src = Paths.get(ruta).toAbsolutePath().normalize();
+        //Resuelvo el archivo a descargar respecto al directorio actual del/la cliente
+        Path origen = directorioActual.resolve(ruta).normalize();
 
-        if (!Files.exists(src) || !Files.isRegularFile(src)) {
+        //Valido que exista y sea archivo normal
+        if (!Files.exists(origen) || !Files.isRegularFile(origen)) {
             salida.println("KO");
-            ServerLogger.log(ip, "RESP: KO (no se ha encontrado download ) " + ruta);
+            ServerLogger.log(ip, "RESPUESTA: KO (no se ha encontrado download) " + ruta);
             return;
         }
 
-        long tamano = Files.size(src);
+        //Saco el tamaño total para mandarlo antes del binario
+        long tamano = Files.size(origen);
 
+        //Le digo al/la cliente que el download va a empezar
         salida.println("OK");
-        ServerLogger.log(ip, "RESP: OK (empezando dowload ) " + src.getFileName() + " (" + tamano + " bytes)");
+        ServerLogger.log(ip, "RESPUESTA: OK (empezando download) " + origen.getFileName() + " (" + tamano + " bytes)");
 
-        //Envío tamaño del archivo
+        //Envío el tamaño del archivo (8 bytes)
         binOut.writeLong(tamano);
 
-        //Abro el archivo para poder leerlo
-        try(InputStream fis = new BufferedInputStream(Files.newInputStream(src))){
-            //Creo el Buffer
+        //Abro el archivo y lo mando por el socket en bloques
+        try(InputStream fis = new BufferedInputStream(Files.newInputStream(origen))){
+            //Creo el buffer
             byte[] buffer = new byte[8192];
-            //Leo el archivo y lo mando por el socket
-            int leer;
-            while((leer = fis.read(buffer)) != -1){
-                binOut.write(buffer, 0, leer);
+            int leidos;
+            //Leo del archivo y lo escribo al socket hasta terminar
+            while((leidos = fis.read(buffer)) != -1){
+                binOut.write(buffer, 0, leidos);
             }
         }
+
+        //Fuerzo el envío real de lo que quede en el buffer
         binOut.flush();
 
-        ServerLogger.log(ip, "DOWNLOAD OK " + src.getFileName());
+        //Dejo registrado que el download terminó bien
+        ServerLogger.log(ip, "DOWNLOAD OK " + origen.getFileName());
     }
 
-    void ejecutarMkdir(String ruta, PrintWriter salida) {
-
-        //Si me llega vacío o null, KO directamente
-        if (ruta == null || ruta.isBlank()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Resuelvo la ruta contra mi directorio actual
-        Path objetivo = directorioActual.resolve(ruta).normalize();
-        File dir = objetivo.toFile();
-
-        //Si ya existe algo con ese nombre, no lo creo
-        if (dir.exists()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Intento crear el directorio
-        if (dir.mkdir()) {
-            salida.println("OK");
-        } else {
-            salida.println("KO");
-        }
-    }
-
-    void ejecutarRename(String origen, String destino, PrintWriter salida) {
-
-        //Si falta algo, no lo puedo renombrar
-        if (origen == null || origen.isBlank() || destino == null || destino.isBlank()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Resuelvo el origen y destino respecto a mi directorio actual
-        File src = directorioActual.resolve(origen).normalize().toFile();
-        File dst = directorioActual.resolve(destino).normalize().toFile();
-
-        //Si el origen no existe, no lo puedo renombrar
-        if (!src.exists()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Si el destino ya existe, no permito que se sobreescriba
-        if (dst.exists()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Intento renombrarlo
-        if (src.renameTo(dst)) {
-            salida.println("OK");
-        } else {
-            salida.println("KO");
-        }
-    }
-
-    void ejecutarExists(String ruta, PrintWriter salida) {
-
-        //Si me llega vacío o null, directamente KO
-        if (ruta == null || ruta.isBlank()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Resuelvo la ruta respecto a mi directorio actual
-        File f = directorioActual.resolve(ruta).normalize().toFile();
-
-        if (f.exists()) {
-            salida.println("OK");
-        } else {
-            salida.println("KO");
-        }
-    }
-
-    void ejecutarInfo(String ruta, PrintWriter salida) {
-
-        //Si me llega vacío o null, no puedo dar info
-        if (ruta == null || ruta.isBlank()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Resuelvo la ruta respecto a mi directorio actual
-        File f = directorioActual.resolve(ruta).normalize().toFile();
-
-        //Si no existe, no puedo dar la información
-        if (!f.exists()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Si existe, empiezo la respuesta
-        salida.println("OK");
-
-        //Indico si es archivo o directorio
-        if (f.isDirectory()) {
-            salida.println("TYPE: DIRECTORIO");
-        } else {
-            salida.println("TYPE: ARCHIVO");
-        }
-
-        //Tamaño en bytes
-        salida.println("TAMAÑO: " + f.length());
-
-        //Última modificación
-        salida.println("ULTIMA_MODIFICACIÓN: " + f.lastModified());
-
-        //Línea vacía para marcar el fin (como en list)
-        salida.println("");
-    }
-
-    void ejecutarPwd(PrintWriter salida) {
-
-        //Devuelvo el directorio actual del cliente
-        salida.println("OK");
-        salida.println(directorioActual.toString());
-    }
-
-    void ejecutarCd(String ruta, PrintWriter salida) {
-
-        //Si me llega vacío o null, no cambio nada
-        if (ruta == null || ruta.isBlank()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Resuelvo la nueva ruta relativa al directorio actual
-        Path nueva = directorioActual.resolve(ruta).normalize();
-        File dir = nueva.toFile();
-
-        //Si no existe o no es directorio, no cambio nada
-        if (!dir.exists() || !dir.isDirectory()) {
-            salida.println("KO");
-            return;
-        }
-
-        //Si es válido, actualizo el estado del cliente
-        directorioActual = nueva;
-
-        salida.println("OK");
-    }
 
 }
