@@ -275,4 +275,42 @@ public class ComandosParaPracticar {
         Files.createFile(p);
         salida.println("OK");
     }
+
+
+
+
+
+
+
+    //CLIENTE
+
+    //info: OK + líneas + línea vacía
+                if (comando.startsWith("info ")) {
+        while (true) {
+            String l = entradaServidor.readLine();
+            if (l == null) return;
+            if (l.isEmpty()) break;
+            System.out.println(l);
+        }
+        continue;
+    }
+
+    //help: OK + líneas + línea vacía
+                if (comando.equals("help")) {
+        while (true) {
+            String l = entradaServidor.readLine();
+            if (l == null) return;
+            if (l.isEmpty()) break;
+            System.out.println(l);
+        }
+        continue;
+    }
+
+    //pwd: OK + 1 línea (ruta)
+                if (comando.equals("pwd")) {
+        String l = entradaServidor.readLine();
+        if (l == null) return;
+        System.out.println(l);
+        continue;
+    }
 }
